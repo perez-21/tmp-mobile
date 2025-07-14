@@ -1,29 +1,92 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { Slot, useRouter, useSegments } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import React, { useEffect, useRef } from "react";
+import { Platform, StyleSheet, View } from "react-native";
+import { PaperProvider } from "react-native-paper";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import Toast from "react-native-toast-message";
+import { ThemeProvider } from "./context/ThemeContext";
+import { TourLMSProvider, useTourLMS } from "./contexts/TourLMSContext";
 
-import { useColorScheme } from '@/hooks/useColorScheme';
+// Color Constants
+const BACKGROUND = "#111827";
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
-  if (!loaded) {
-    // Async font loading only occurs in development.
-    return null;
-  }
+function useProtectedRoute() {
+  const segments = useSegments();
+  const router = useRouter();
+  const { user, token, loading } = useTourLMS();
+  const isNavigating = useRef(false);
+
+  useEffect(() => {
+    // Don't run the auth check while still loading
+    if (loading) return;
+
+    const inAuthGroup = segments[0] === "(auth)";
+    const isLandingPage = segments[0] === undefined;
+
+    if (isNavigating.current) return;
+
+    if (!user && !token && !inAuthGroup && !isLandingPage) {
+      isNavigating.current = true;
+      router.replace("/(auth)/login");
+    } else if (user && token && (inAuthGroup || isLandingPage)) {
+      isNavigating.current = true;
+      router.replace("./student");
+    }
+
+    return () => {
+      isNavigating.current = false;
+    };
+  }, [user, token, segments, router, loading]);
+}
+
+function AppContent() {
+  const { loading } = useTourLMS();
+  useProtectedRoute();
+
+  useEffect(() => {
+    if (!loading) {
+      // Hide splash screen once we're done loading
+      SplashScreen.hideAsync().catch(console.warn);
+    }
+  }, [loading]);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
+    <SafeAreaProvider>
+      <View style={styles.container}>
+        <StatusBar style={Platform.OS === "ios" ? "light" : "auto"} />
+        <Slot />
+        <Toast />
+      </View>
+    </SafeAreaProvider>
+  );
+}
+
+function RootLayoutNav() {
+  return (
+    <PaperProvider>
+      <AppContent />
+    </PaperProvider>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <TourLMSProvider>
+        <RootLayoutNav />
+      </TourLMSProvider>
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: BACKGROUND,
+  },
+});
